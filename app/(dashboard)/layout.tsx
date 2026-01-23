@@ -2,6 +2,10 @@ import { auth, signOut } from "@/lib/auth"
 import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
+import { WorkspaceSwitcher } from "@/components/workspace-switcher"
+import { WorkspaceCreateDialog } from "@/components/workspace-create-dialog"
+import { prisma } from "@/lib/prisma"
+import { cookies } from "next/headers"
 
 export default async function DashboardLayout({
   children,
@@ -13,6 +17,22 @@ export default async function DashboardLayout({
   if (!session) {
     redirect("/login")
   }
+
+  // Fetch user with workspaces
+  const user = await prisma.user.findUnique({
+    where: { email: session.user?.email || "" },
+    include: {
+      workspaces: {
+        orderBy: { createdAt: "desc" },
+      },
+    },
+  })
+
+  const workspaces = user?.workspaces || []
+
+  // Get selected workspace from cookie
+  const cookieStore = await cookies()
+  const selectedWorkspaceId = cookieStore.get("consay_workspace_id")?.value
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -38,6 +58,11 @@ export default async function DashboardLayout({
             </nav>
           </div>
           <div className="flex items-center gap-4">
+            <WorkspaceSwitcher
+              workspaces={workspaces}
+              currentWorkspaceId={selectedWorkspaceId}
+            />
+            <WorkspaceCreateDialog />
             <span className="text-sm text-gray-600">{session.user?.email}</span>
             <form
               action={async () => {

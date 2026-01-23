@@ -40,15 +40,54 @@
 4. Selected workspace persists via cookies
 5. Dashboard displays current workspace name
 
-### Next: Phase 3 - Consent Record Creation (Flow A)
-- [ ] Build "New Consent Request" form
+## Phase 3: Consent Record Creation (Flow A) ✅ COMPLETE
+
+- [x] Build "New Consent Request" form
   - Content URL input
   - Creator handle + platform selector
   - Scope selector (required)
-- [ ] Generate consent text copy (templated, human language)
-- [ ] Create consent record + pending event in DB
-- [ ] Generate unique approval token
-- [ ] Display copyable approval link + message copy for DM
+- [x] Generate consent text copy (templated, human language)
+- [x] Create consent record + pending event in DB
+- [x] Generate unique approval token
+- [x] Display copyable approval link + message copy for DM
+
+### What's Built
+- `/api/records` - Create and list consent records
+- `/new` - New consent request form
+- `/records/[id]` - Record detail page with approval link
+- Consent text generation utility (`lib/consent-copy.ts`)
+- Token generation utilities (`lib/tokens.ts`)
+- CopyButton component for easy clipboard copying
+- Records list on homepage with status badges
+
+### User Flow
+1. User clicks "New Request" from dashboard
+2. Fills in content details (URL, creator, platform, scope)
+3. Previews consent message that will be sent
+4. Submits form → record created with pending status
+5. Success page shows:
+   - Approval link (copyable)
+   - Full DM message (copyable)
+   - Public record URL
+6. User manually sends DM to creator with approval link
+7. Dashboard shows all records with status badges
+
+### Technical Details
+- Cryptographically secure approval tokens (32-byte base64url)
+- Short, unique slugs for public URLs (12 characters)
+- Approval tokens expire after 30 days
+- Consent text stored verbatim (append-only)
+- Scope explicitly required (organic/paid_ads/organic_and_ads)
+- Automatic slug collision handling
+
+### Next: Phase 4 - Creator Approval Page
+- [ ] Build `/approve/[token]` page
+  - Show consent text verbatim
+  - Show scope clearly
+  - One-click "Approve" button
+- [ ] Handle approval: update event status, log timestamp
+- [ ] Handle decline: update event status
+- [ ] Handle expired/invalid tokens gracefully
 
 ## Before Running
 1. Set up database (local Postgres or Vercel Postgres)
@@ -58,4 +97,4 @@
 5. Run `npm run dev`
 
 ## To Resume Work
-Tell Claude: "Continue implementing Consay from IMPLEMENTATION_PLAN.md - we finished Phase 2, start Phase 3"
+Tell Claude: "Continue implementing Consay from IMPLEMENTATION_PLAN.md - we finished Phase 3, start Phase 4"

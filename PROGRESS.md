@@ -80,14 +80,53 @@
 - Scope explicitly required (organic/paid_ads/organic_and_ads)
 - Automatic slug collision handling
 
-### Next: Phase 4 - Creator Approval Page
-- [ ] Build `/approve/[token]` page
+## Phase 4: Creator Approval Page ✅ COMPLETE
+
+- [x] Build `/approve/[token]` page
   - Show consent text verbatim
   - Show scope clearly
   - One-click "Approve" button
-- [ ] Handle approval: update event status, log timestamp
-- [ ] Handle decline: update event status
-- [ ] Handle expired/invalid tokens gracefully
+- [x] Handle approval: update event status, log timestamp
+- [x] Handle decline: update event status
+- [x] Handle expired/invalid tokens gracefully
+
+### What's Built
+- `/api/approve` - POST endpoint for approve/decline actions
+- `/api/approve/details` - GET endpoint to fetch consent event details
+- `/approve/[token]` - Public approval page (no auth required)
+- Token validation and expiry checking
+- Success, error, and already-processed states
+
+### User Flow (Creator)
+1. Creator receives DM with approval link
+2. Clicks link → opens public approval page
+3. Sees consent text, content URL, platform, and scope
+4. Reviews the request details
+5. Clicks "Approve" or "Decline"
+6. Sees confirmation message
+7. Requester's dashboard updates with new status
+
+### States Handled
+- **Pending**: Creator can approve or decline
+- **Already processed**: Shows previous decision with timestamp
+- **Token expired**: Clear error message
+- **Invalid token**: Helpful error guidance
+- **Network errors**: User-friendly messages
+
+### Technical Details
+- Public route (excluded from auth middleware)
+- One-time use enforcement (can't approve twice)
+- Expiry validation (default 30 days)
+- Timestamp logging for approvals
+- Status updates: pending → approved/declined
+
+### Next: Phase 5 - Public Consent Record Page
+- [ ] Build `/c/[slug]` page
+  - Content URL
+  - Creator handle + platform
+  - Full event timeline (append-only history)
+  - Each event shows: scope, consent text, timestamp, status
+- [ ] No edit capabilities on public page
 
 ## Before Running
 1. Set up database (local Postgres or Vercel Postgres)
@@ -97,4 +136,4 @@
 5. Run `npm run dev`
 
 ## To Resume Work
-Tell Claude: "Continue implementing Consay from IMPLEMENTATION_PLAN.md - we finished Phase 3, start Phase 4"
+Tell Claude: "Continue implementing Consay from IMPLEMENTATION_PLAN.md - we finished Phase 4, start Phase 5"

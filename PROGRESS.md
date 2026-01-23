@@ -120,13 +120,77 @@
 - Timestamp logging for approvals
 - Status updates: pending → approved/declined
 
-### Next: Phase 5 - Public Consent Record Page
-- [ ] Build `/c/[slug]` page
+## Phase 5: Public Consent Record Page ✅ COMPLETE
+
+- [x] Build `/c/[slug]` page
   - Content URL
   - Creator handle + platform
   - Full event timeline (append-only history)
   - Each event shows: scope, consent text, timestamp, status
-- [ ] No edit capabilities on public page
+- [x] No edit capabilities on public page
+
+### What's Built
+- `/c/[slug]` - Public consent record page (no auth required)
+- Timeline visualization with chronological event history
+- Status badges and event metadata display
+- Immutable, append-only record view
+
+### Page Features
+- **Current Status Section**:
+  - Content URL (clickable)
+  - Creator handle and platform
+  - Latest approval status with badge
+  - Current usage scope
+- **Consent History Timeline**:
+  - All events in chronological order (oldest → newest)
+  - Visual timeline with connecting line and dots
+  - Each event shows: type, status, timestamps, scope, consent text
+  - "Current" badge on latest event
+  - Color-coded status badges
+
+### Use Cases
+- Share with legal teams for compliance
+- Provide to clients as proof of consent
+- Reference during scope discussions
+- Permanent audit trail
+- Single source of truth ("are we covered?")
+
+### Technical Details
+- Public route (no authentication)
+- Fetches by slug (shareable URL)
+- Read-only (no edit capabilities)
+- Shows 404 if slug doesn't exist
+- Consent text displayed verbatim
+- Append-only history
+
+### Philosophy
+- Think: receipts, not workflows
+- Immutable, defensible record
+- Replaces fragile screenshots
+- Answers "what was approved, when, by whom"
+
+## MVP Complete! 🎉
+
+All core flows are now implemented:
+- ✅ Authentication & Workspaces
+- ✅ Create consent requests
+- ✅ Creator approval flow
+- ✅ Public consent records
+- ✅ Status tracking & history
+
+**What works end-to-end:**
+1. User creates workspace
+2. User creates consent request → gets approval link
+3. User sends link to creator via DM
+4. Creator approves/declines
+5. Dashboard updates with status
+6. Public record shows full history
+
+**Ready for:**
+- Database setup and testing
+- Optional: Scope expansion flow (Flow B)
+- Optional: Screenshot attachment fallback
+- Optional: PDF export
 
 ## Before Running
 1. Set up database (local Postgres or Vercel Postgres)

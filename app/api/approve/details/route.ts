@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma"
+import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 
 export async function GET(request: Request) {
@@ -10,15 +10,19 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Find the consent event by approval token
-    const event = await prisma.consentEvent.findUnique({
-      where: { approvalToken: token },
-      include: {
-        record: true,
-      },
-    })
+    const supabase = await createClient()
 
-    if (!event) {
+    // Find the consent event by approval token
+    const { data: event, error } = await supabase
+      .from("consent_events")
+      .select(`
+        *,
+        record:consent_records(*)
+      `)
+      .eq("approval_token", token)
+      .single()
+
+    if (error || !event) {
       return NextResponse.json(
         { error: "Invalid approval link. This link may be incorrect." },
         { status: 404 }

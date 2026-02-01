@@ -13,7 +13,7 @@ import {
 type Workspace = {
   id: string
   name: string
-  createdAt: Date
+  created_at: string
 }
 
 type WorkspaceSwitcherProps = {

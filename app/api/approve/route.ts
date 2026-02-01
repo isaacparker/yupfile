@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma"
+import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
 
 export async function POST(request: Request) {
@@ -20,15 +20,19 @@ export async function POST(request: Request) {
   }
 
   try {
-    // Find the consent event by approval token
-    const event = await prisma.consentEvent.findUnique({
-      where: { approvalToken: token },
-      include: {
-        record: true,
-      },
-    })
+    const supabase = await createClient()
 
-    if (!event) {
+    // Find the consent event by approval token
+    const { data: event, error: fetchError } = await supabase
+      .from("consent_events")
+      .select(`
+        *,
+        record:consent_records(*)
+      `)
+      .eq("approval_token", token)
+      .single()
+
+    if (fetchError || !event) {
       return NextResponse.json(
         { error: "Invalid approval link. This link may be incorrect or has already been used." },
         { status: 404 }
@@ -41,14 +45,14 @@ export async function POST(request: Request) {
         {
           error: `This request has already been ${event.status}.`,
           status: event.status,
-          approvedAt: event.approvedAt,
+          approvedAt: event.approved_at,
         },
         { status: 400 }
       )
     }
 
     // Check if token is expired
-    if (event.approvalTokenExpiry && new Date() > event.approvalTokenExpiry) {
+    if (event.approval_token_expiry && new Date() > new Date(event.approval_token_expiry)) {
       return NextResponse.json(
         { error: "This approval link has expired. Please contact the requester for a new link." },
         { status: 400 }
@@ -56,16 +60,22 @@ export async function POST(request: Request) {
     }
 
     // Update the event status
-    const updatedEvent = await prisma.consentEvent.update({
-      where: { id: event.id },
-      data: {
+    const { data: updatedEvent, error: updateError } = await supabase
+      .from("consent_events")
+      .update({
         status: action === "approve" ? "approved" : "declined",
-        approvedAt: action === "approve" ? new Date() : null,
-      },
-      include: {
-        record: true,
-      },
-    })
+        approved_at: action === "approve" ? new Date().toISOString() : null,
+      })
+      .eq("id", event.id)
+      .select(`
+        *,
+        record:consent_records(*)
+      `)
+      .single()
+
+    if (updateError) {
+      throw updateError
+    }
 
     return NextResponse.json({
       success: true,

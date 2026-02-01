@@ -1,10 +1,9 @@
-import { auth, signOut } from "@/lib/auth"
+import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { WorkspaceSwitcher } from "@/components/workspace-switcher"
 import { WorkspaceCreateDialog } from "@/components/workspace-create-dialog"
-import { prisma } from "@/lib/prisma"
 import { cookies } from "next/headers"
 
 export default async function DashboardLayout({
@@ -12,27 +11,25 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const session = await auth()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
 
-  if (!session) {
+  if (!user) {
     redirect("/login")
   }
 
-  // Fetch user with workspaces
-  const user = await prisma.user.findUnique({
-    where: { email: session.user?.email || "" },
-    include: {
-      workspaces: {
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  })
+  // Fetch workspaces for current user
+  const { data: workspaces } = await supabase
+    .from("workspaces")
+    .select("*")
+    .order("created_at", { ascending: false })
 
-  const workspaces = user?.workspaces || []
+  const workspaceList = workspaces || []
 
-  // Get selected workspace from cookie
+  // Get selected workspace from cookie, fallback to first workspace
   const cookieStore = await cookies()
-  const selectedWorkspaceId = cookieStore.get("consay_workspace_id")?.value
+  const cookieWorkspaceId = cookieStore.get("consay_workspace_id")?.value
+  const selectedWorkspaceId = cookieWorkspaceId || workspaceList[0]?.id
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -59,15 +56,17 @@ export default async function DashboardLayout({
           </div>
           <div className="flex items-center gap-4">
             <WorkspaceSwitcher
-              workspaces={workspaces}
+              workspaces={workspaceList}
               currentWorkspaceId={selectedWorkspaceId}
             />
             <WorkspaceCreateDialog />
-            <span className="text-sm text-gray-600">{session.user?.email}</span>
+            <span className="text-sm text-gray-600">{user.email}</span>
             <form
               action={async () => {
                 "use server"
-                await signOut()
+                const supabase = await createClient()
+                await supabase.auth.signOut()
+                redirect("/login")
               }}
             >
               <Button variant="outline" size="sm" type="submit">

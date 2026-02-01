@@ -1,8 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { createClient } from "@/lib/supabase/server"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { WorkspaceCreateDialog } from "@/components/workspace-create-dialog"
@@ -10,33 +9,30 @@ import Link from "next/link"
 import { SCOPE_LABELS } from "@/lib/consent-copy"
 
 export default async function HomePage() {
-  const session = await auth()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
 
-  if (!session?.user?.email) {
+  if (!user) {
     redirect("/login")
   }
 
-  // Fetch user with workspaces
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: {
-      workspaces: {
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  })
+  // Fetch workspaces for current user
+  const { data: workspaces } = await supabase
+    .from("workspaces")
+    .select("*")
+    .order("created_at", { ascending: false })
 
-  const workspaces = user?.workspaces || []
+  const workspaceList = workspaces || []
 
   // Get selected workspace from cookie
   const cookieStore = await cookies()
   const selectedWorkspaceId = cookieStore.get("consay_workspace_id")?.value
 
   // Find the current workspace
-  const currentWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId) || workspaces[0]
+  const currentWorkspace = workspaceList.find((w) => w.id === selectedWorkspaceId) || workspaceList[0]
 
   // If no workspaces exist, show empty state
-  if (workspaces.length === 0) {
+  if (workspaceList.length === 0) {
     return (
       <div className="space-y-6">
         <div>
@@ -62,20 +58,40 @@ export default async function HomePage() {
   }
 
   // Fetch consent records for current workspace
-  const records = currentWorkspace
-    ? await prisma.consentRecord.findMany({
-        where: {
-          workspaceId: currentWorkspace.id,
-        },
-        include: {
-          events: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      })
-    : []
+  let records: Array<{
+    id: string
+    slug: string
+    content_url: string
+    creator_handle: string
+    platform: string
+    workspace_id: string
+    created_at: string
+    events: Array<{
+      id: string
+      status: string
+      scope: string
+    }>
+  }> = []
+
+  if (currentWorkspace) {
+    const { data: recordsData } = await supabase
+      .from("consent_records")
+      .select(`
+        *,
+        events:consent_events(id, status, scope)
+      `)
+      .eq("workspace_id", currentWorkspace.id)
+      .order("created_at", { ascending: false })
+
+    records = (recordsData || []).map(r => ({
+      ...r,
+      events: r.events
+        ?.sort((a: { id: string; status: string; scope: string; created_at?: string }, b: { id: string; status: string; scope: string; created_at?: string }) =>
+          new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+        )
+        .slice(0, 1) || []
+    }))
+  }
 
   const statusColor = (status: string) =>
     ({
@@ -126,7 +142,7 @@ export default async function HomePage() {
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           <h3 className="font-semibold text-lg">
-                            {record.creatorHandle}
+                            {record.creator_handle}
                           </h3>
                           <Badge variant="outline" className="capitalize">
                             {record.platform}
@@ -139,11 +155,11 @@ export default async function HomePage() {
                           Scope: {SCOPE_LABELS[latestEvent?.scope as keyof typeof SCOPE_LABELS] || "Unknown"}
                         </p>
                         <p className="text-sm text-gray-500 truncate">
-                          {record.contentUrl}
+                          {record.content_url}
                         </p>
                       </div>
                       <div className="text-right text-sm text-gray-500">
-                        {new Date(record.createdAt).toLocaleDateString()}
+                        {new Date(record.created_at).toLocaleDateString()}
                       </div>
                     </div>
                   </CardContent>

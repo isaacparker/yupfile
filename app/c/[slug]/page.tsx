@@ -1,29 +1,36 @@
-import { prisma } from "@/lib/prisma"
+import { createClient } from "@/lib/supabase/server"
 import { notFound } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { SCOPE_LABELS } from "@/lib/consent-copy"
 
 type PageProps = {
-  params: { slug: string }
+  params: Promise<{ slug: string }>
 }
 
 export default async function PublicConsentRecordPage({ params }: PageProps) {
-  // Fetch the consent record by slug
-  const record = await prisma.consentRecord.findUnique({
-    where: { slug: params.slug },
-    include: {
-      events: {
-        orderBy: { createdAt: "asc" }, // Chronological order (oldest first)
-      },
-    },
-  })
+  const { slug } = await params
+  const supabase = await createClient()
+
+  // Fetch the consent record by slug (public access - no auth required)
+  const { data: record } = await supabase
+    .from("consent_records")
+    .select(`
+      *,
+      events:consent_events(*)
+    `)
+    .eq("slug", slug)
+    .single()
 
   if (!record) {
     notFound()
   }
 
-  const latestEvent = record.events[record.events.length - 1]
+  // Sort events chronologically (oldest first for display)
+  const sortedEvents = [...(record.events || [])].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  )
+  const latestEvent = sortedEvents[sortedEvents.length - 1]
 
   const statusColor = (status: string) =>
     ({
@@ -60,12 +67,12 @@ export default async function PublicConsentRecordPage({ params }: PageProps) {
               <label className="text-sm font-medium text-gray-500">Content</label>
               <div className="mt-1">
                 <a
-                  href={record.contentUrl}
+                  href={record.content_url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-blue-600 hover:underline break-all"
                 >
-                  {record.contentUrl}
+                  {record.content_url}
                 </a>
               </div>
             </div>
@@ -73,7 +80,7 @@ export default async function PublicConsentRecordPage({ params }: PageProps) {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium text-gray-500">Creator</label>
-                <div className="mt-1">{record.creatorHandle}</div>
+                <div className="mt-1">{record.creator_handle}</div>
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-500">Platform</label>
@@ -104,9 +111,9 @@ export default async function PublicConsentRecordPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {record.events.map((event, index) => {
-                const isLatest = index === record.events.length - 1
-                const isInitial = event.eventType === "initial"
+              {sortedEvents.map((event, index) => {
+                const isLatest = index === sortedEvents.length - 1
+                const isInitial = event.event_type === "initial"
 
                 return (
                   <div
@@ -134,10 +141,10 @@ export default async function PublicConsentRecordPage({ params }: PageProps) {
 
                       {/* Timestamp */}
                       <div className="text-sm text-gray-500">
-                        Created: {new Date(event.createdAt).toLocaleString()}
-                        {event.approvedAt && (
+                        Created: {new Date(event.created_at).toLocaleString()}
+                        {event.approved_at && (
                           <span className="ml-3 text-green-600">
-                            Approved: {new Date(event.approvedAt).toLocaleString()}
+                            Approved: {new Date(event.approved_at).toLocaleString()}
                           </span>
                         )}
                       </div>
@@ -161,7 +168,7 @@ export default async function PublicConsentRecordPage({ params }: PageProps) {
                         </label>
                         <div className="mt-2 bg-gray-50 p-4 rounded-lg border">
                           <pre className="whitespace-pre-wrap text-sm text-gray-700">
-                            {event.consentText}
+                            {event.consent_text}
                           </pre>
                         </div>
                       </div>
@@ -179,7 +186,7 @@ export default async function PublicConsentRecordPage({ params }: PageProps) {
             This is a permanent, immutable record of content usage consent.
           </p>
           <p className="mt-1">
-            Record created: {new Date(record.createdAt).toLocaleDateString()}
+            Record created: {new Date(record.created_at).toLocaleDateString()}
           </p>
         </div>
       </div>

@@ -1,30 +1,30 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, use } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle, XCircle, AlertCircle } from "lucide-react"
 
 type PageProps = {
-  params: { token: string }
+  params: Promise<{ token: string }>
 }
 
 type ConsentEvent = {
   id: string
-  eventType: string
+  event_type: string
   scope: string
-  consentText: string
+  consent_text: string
   status: string
-  approvedAt: string | null
-  createdAt: string
+  approved_at: string | null
+  created_at: string
 }
 
 type ConsentRecord = {
   id: string
   slug: string
-  contentUrl: string
-  creatorHandle: string
+  content_url: string
+  creator_handle: string
   platform: string
 }
 
@@ -35,6 +35,7 @@ const SCOPE_LABELS = {
 } as const
 
 export default function ApprovalPage({ params }: PageProps) {
+  const { token } = use(params)
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
   const [event, setEvent] = useState<ConsentEvent | null>(null)
@@ -46,7 +47,7 @@ export default function ApprovalPage({ params }: PageProps) {
   useEffect(() => {
     async function fetchEvent() {
       try {
-        const response = await fetch(`/api/approve/details?token=${params.token}`)
+        const response = await fetch(`/api/approve/details?token=${token}`)
 
         if (!response.ok) {
           const data = await response.json()
@@ -66,7 +67,7 @@ export default function ApprovalPage({ params }: PageProps) {
     }
 
     fetchEvent()
-  }, [params.token])
+  }, [token])
 
   const handleAction = async (action: "approve" | "decline") => {
     setProcessing(true)
@@ -77,7 +78,7 @@ export default function ApprovalPage({ params }: PageProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          token: params.token,
+          token: token,
           action,
         }),
       })
@@ -142,12 +143,12 @@ export default function ApprovalPage({ params }: PageProps) {
                 <p className="text-sm text-gray-600">
                   <strong>Content:</strong>{" "}
                   <a
-                    href={record.contentUrl}
+                    href={record.content_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline"
                   >
-                    {record.contentUrl}
+                    {record.content_url}
                   </a>
                 </p>
                 {event && (
@@ -213,8 +214,8 @@ export default function ApprovalPage({ params }: PageProps) {
             <div className="bg-white p-4 rounded border border-blue-200">
               <p className="text-blue-800 mb-2">
                 This consent request was <strong>{event.status}</strong>
-                {event.approvedAt && (
-                  <span> on {new Date(event.approvedAt).toLocaleDateString()}</span>
+                {event.approved_at && (
+                  <span> on {new Date(event.approved_at).toLocaleDateString()}</span>
                 )}
                 .
               </p>
@@ -222,12 +223,12 @@ export default function ApprovalPage({ params }: PageProps) {
                 <p className="text-sm text-gray-600">
                   <strong>Content:</strong>{" "}
                   <a
-                    href={record.contentUrl}
+                    href={record.content_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline"
                   >
-                    {record.contentUrl}
+                    {record.content_url}
                   </a>
                 </p>
               )}
@@ -255,12 +256,12 @@ export default function ApprovalPage({ params }: PageProps) {
                 <label className="text-sm font-medium text-gray-500">Your Content</label>
                 <div className="mt-1">
                   <a
-                    href={record.contentUrl}
+                    href={record.content_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline break-all"
                   >
-                    {record.contentUrl}
+                    {record.content_url}
                   </a>
                 </div>
               </div>
@@ -289,7 +290,7 @@ export default function ApprovalPage({ params }: PageProps) {
               <label className="text-sm font-medium text-gray-700 mb-2 block">
                 Full Request Message
               </label>
-              <pre className="whitespace-pre-wrap text-sm">{event.consentText}</pre>
+              <pre className="whitespace-pre-wrap text-sm">{event.consent_text}</pre>
             </div>
           )}
 

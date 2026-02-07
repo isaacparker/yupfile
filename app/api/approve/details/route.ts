@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server"
+import { mapEvent, mapRecord } from "@/lib/supabase/db"
 import { NextResponse } from "next/server"
 
 export async function GET(request: Request) {
@@ -13,25 +14,29 @@ export async function GET(request: Request) {
     const supabase = await createClient()
 
     // Find the consent event by approval token
-    const { data: event, error } = await supabase
+    const { data: eventRow, error: eventError } = await supabase
       .from("consent_events")
-      .select(`
-        *,
-        record:consent_records(*)
-      `)
+      .select("*")
       .eq("approval_token", token)
       .single()
 
-    if (error || !event) {
+    if (eventError || !eventRow) {
       return NextResponse.json(
         { error: "Invalid approval link. This link may be incorrect." },
         { status: 404 }
       )
     }
 
+    // Fetch the associated record
+    const { data: recordRow } = await supabase
+      .from("consent_records")
+      .select("*")
+      .eq("id", eventRow.record_id)
+      .single()
+
     return NextResponse.json({
-      event,
-      record: event.record,
+      event: mapEvent(eventRow),
+      record: recordRow ? mapRecord(recordRow) : null,
     })
   } catch (error) {
     console.error("Error fetching approval details:", error)

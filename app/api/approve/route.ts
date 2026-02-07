@@ -23,16 +23,13 @@ export async function POST(request: Request) {
     const supabase = await createClient()
 
     // Find the consent event by approval token
-    const { data: event, error: fetchError } = await supabase
+    const { data: event, error: findError } = await supabase
       .from("consent_events")
-      .select(`
-        *,
-        record:consent_records(*)
-      `)
+      .select("*, consent_records(*)")
       .eq("approval_token", token)
       .single()
 
-    if (fetchError || !event) {
+    if (findError || !event) {
       return NextResponse.json(
         { error: "Invalid approval link. This link may be incorrect or has already been used." },
         { status: 404 }
@@ -67,20 +64,17 @@ export async function POST(request: Request) {
         approved_at: action === "approve" ? new Date().toISOString() : null,
       })
       .eq("id", event.id)
-      .select(`
-        *,
-        record:consent_records(*)
-      `)
+      .select("*, consent_records(*)")
       .single()
 
     if (updateError) {
-      throw updateError
+      throw new Error(updateError.message)
     }
 
     return NextResponse.json({
       success: true,
-      status: updatedEvent.status,
-      record: updatedEvent.record,
+      status: updatedEvent?.status,
+      record: updatedEvent?.consent_records,
     })
   } catch (error) {
     console.error("Error processing approval:", error)

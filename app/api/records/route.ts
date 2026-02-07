@@ -1,18 +1,21 @@
+import { auth } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
+import { mapRecord, mapEvent } from "@/lib/supabase/db"
 import { generateApprovalToken, generateSlug, generateTokenExpiry } from "@/lib/tokens"
 import { generateConsentText } from "@/lib/consent-copy"
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const session = await auth()
 
-  if (!user) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  // Get workspace from cookie, or fallback to first workspace
+  const supabase = await createClient()
+
+  // Get workspace from cookie
   const cookieStore = await cookies()
   let workspaceId = cookieStore.get("consay_workspace_id")?.value
 
@@ -21,6 +24,7 @@ export async function POST(request: Request) {
     const { data: workspaces } = await supabase
       .from("workspaces")
       .select("id")
+      .eq("user_id", session.user.id)
       .order("created_at", { ascending: false })
       .limit(1)
 
@@ -34,11 +38,12 @@ export async function POST(request: Request) {
     )
   }
 
-  // Verify workspace belongs to user (RLS will handle this, but we check explicitly)
+  // Verify workspace belongs to user (RLS handles this, but explicit check)
   const { data: workspace, error: workspaceError } = await supabase
     .from("workspaces")
-    .select("*")
+    .select("id")
     .eq("id", workspaceId)
+    .eq("user_id", session.user.id)
     .single()
 
   if (workspaceError || !workspace) {
@@ -64,20 +69,19 @@ export async function POST(request: Request) {
   try {
     // Generate unique slug (with collision check)
     let slug = generateSlug()
-    let { data: slugExists } = await supabase
+    let { data: existing } = await supabase
       .from("consent_records")
       .select("id")
       .eq("slug", slug)
       .single()
-
-    while (slugExists) {
+    while (existing) {
       slug = generateSlug()
       const result = await supabase
         .from("consent_records")
         .select("id")
         .eq("slug", slug)
         .single()
-      slugExists = result.data
+      existing = result.data
     }
 
     // Generate consent text
@@ -93,7 +97,7 @@ export async function POST(request: Request) {
     const approvalTokenExpiry = generateTokenExpiry()
 
     // Create consent record
-    const { data: record, error: recordError } = await supabase
+    const { data: recordRow, error: recordError } = await supabase
       .from("consent_records")
       .insert({
         slug,
@@ -105,15 +109,15 @@ export async function POST(request: Request) {
       .select()
       .single()
 
-    if (recordError || !record) {
-      throw recordError || new Error("Failed to create record")
+    if (recordError || !recordRow) {
+      throw new Error(recordError?.message || "Failed to create record")
     }
 
     // Create initial consent event
-    const { data: event, error: eventError } = await supabase
+    const { data: eventRow, error: eventError } = await supabase
       .from("consent_events")
       .insert({
-        record_id: record.id,
+        record_id: recordRow.id,
         event_type: "initial",
         scope,
         consent_text: consentText,
@@ -125,15 +129,18 @@ export async function POST(request: Request) {
       .single()
 
     if (eventError) {
-      throw eventError
+      throw new Error(eventError.message)
     }
 
+    const record = mapRecord(recordRow)
+    const event = eventRow ? mapEvent(eventRow) : null
+
     // Generate approval URL
-    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000"
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
     const approvalUrl = `${baseUrl}/approve/${approvalToken}`
 
     return NextResponse.json({
-      record: { ...record, events: [event] },
+      record: { ...record, events: event ? [event] : [] },
       approvalUrl,
       consentText,
     })
@@ -147,10 +154,9 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const session = await auth()
 
-  if (!user) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -162,25 +168,39 @@ export async function GET() {
     return NextResponse.json([])
   }
 
-  // Fetch all records for the workspace (RLS will filter by user)
-  const { data: records } = await supabase
+  const supabase = await createClient()
+
+  // Fetch records (RLS ensures user only sees their own)
+  const { data: recordRows } = await supabase
     .from("consent_records")
-    .select(`
-      *,
-      events:consent_events(*)
-    `)
+    .select("*")
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
 
-  // Get only the latest event for each record (sort by created_at desc first)
-  const recordsWithLatestEvent = (records || []).map(record => ({
-    ...record,
-    events: record.events
-      ?.sort((a: { created_at: string }, b: { created_at: string }) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )
-      .slice(0, 1) || []
+  if (!recordRows || recordRows.length === 0) {
+    return NextResponse.json([])
+  }
+
+  // Fetch latest event for each record
+  const recordIds = recordRows.map((r) => r.id)
+  const { data: eventRows } = await supabase
+    .from("consent_events")
+    .select("*")
+    .in("record_id", recordIds)
+    .order("created_at", { ascending: false })
+
+  const eventsByRecord = new Map<string, ReturnType<typeof mapEvent>[]>()
+  for (const row of eventRows || []) {
+    const mapped = mapEvent(row)
+    const existing = eventsByRecord.get(mapped.recordId) || []
+    existing.push(mapped)
+    eventsByRecord.set(mapped.recordId, existing)
+  }
+
+  const records = recordRows.map((row) => ({
+    ...mapRecord(row),
+    events: (eventsByRecord.get(row.id) || []).slice(0, 1),
   }))
 
-  return NextResponse.json(recordsWithLatestEvent)
+  return NextResponse.json(records)
 }

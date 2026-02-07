@@ -1,27 +1,29 @@
+import { auth } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/server"
+import { mapWorkspace } from "@/lib/supabase/db"
 import { NextResponse } from "next/server"
 
 export async function GET() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const session = await auth()
 
-  if (!user) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const { data: workspaces } = await supabase
+  const supabase = await createClient()
+  const { data: rows } = await supabase
     .from("workspaces")
     .select("*")
+    .eq("user_id", session.user.id)
     .order("created_at", { ascending: false })
 
-  return NextResponse.json(workspaces || [])
+  return NextResponse.json((rows || []).map(mapWorkspace))
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const session = await auth()
 
-  if (!user) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -32,19 +34,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Workspace name is required" }, { status: 400 })
   }
 
-  const { data: workspace, error } = await supabase
+  const supabase = await createClient()
+  const { data: row, error } = await supabase
     .from("workspaces")
-    .insert({
-      name: name.trim(),
-      user_id: user.id,
-    })
+    .insert({ name: name.trim(), user_id: session.user.id })
     .select()
     .single()
 
   if (error) {
-    console.error("Failed to create workspace:", error)
     return NextResponse.json({ error: "Failed to create workspace" }, { status: 500 })
   }
 
-  return NextResponse.json(workspace)
+  return NextResponse.json(mapWorkspace(row))
 }

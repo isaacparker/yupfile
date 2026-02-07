@@ -110,6 +110,16 @@ CREATE POLICY "Anyone can update events with valid approval token"
   ON consent_events FOR UPDATE
   USING (true);
 
+-- Public access: /c/[slug] page needs to read records by slug (no auth)
+CREATE POLICY "Anyone can view consent records by slug"
+  ON consent_records FOR SELECT
+  USING (true);
+
+-- Public access: /approve/[token] page needs to read events by token (no auth)
+CREATE POLICY "Anyone can view consent events by token"
+  ON consent_events FOR SELECT
+  USING (true);
+
 -- RLS Policies for Screenshots
 CREATE POLICY "Users can view screenshots for their records"
   ON screenshots FOR SELECT

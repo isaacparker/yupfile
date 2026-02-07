@@ -1,9 +1,11 @@
-import { createClient } from "@/lib/supabase/server"
+import { auth, signOut } from "@/lib/auth"
 import { redirect } from "next/navigation"
-import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { WorkspaceSwitcher } from "@/components/workspace-switcher"
-import { WorkspaceCreateDialog } from "@/components/workspace-create-dialog"
+import { NavLinks } from "@/components/nav-links"
+import { UserMenu } from "@/components/user-menu"
+import { Separator } from "@/components/ui/separator"
+import { createClient } from "@/lib/supabase/server"
+import { mapWorkspace } from "@/lib/supabase/db"
 import { cookies } from "next/headers"
 
 export default async function DashboardLayout({
@@ -11,69 +13,66 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const session = await auth()
 
-  if (!user) {
+  if (!session) {
     redirect("/login")
   }
 
-  // Fetch workspaces for current user
-  const { data: workspaces } = await supabase
+  const supabase = await createClient()
+
+  // Fetch workspaces for this user
+  const { data: workspaceRows } = await supabase
     .from("workspaces")
     .select("*")
+    .eq("user_id", session.user.id)
     .order("created_at", { ascending: false })
 
-  const workspaceList = workspaces || []
+  let workspaces = (workspaceRows || []).map(mapWorkspace)
 
-  // Get selected workspace from cookie, fallback to first workspace
+  // Auto-create a default workspace if the user has none
+  if (workspaces.length === 0) {
+    const { data: newRow } = await supabase
+      .from("workspaces")
+      .insert({ name: "My Workspace", user_id: session.user.id })
+      .select()
+      .single()
+
+    if (newRow) {
+      workspaces = [mapWorkspace(newRow)]
+    }
+  }
+
+  // Get selected workspace from cookie
   const cookieStore = await cookies()
-  const cookieWorkspaceId = cookieStore.get("consay_workspace_id")?.value
-  const selectedWorkspaceId = cookieWorkspaceId || workspaceList[0]?.id
+  const selectedWorkspaceId = cookieStore.get("consay_workspace_id")?.value
+  const currentWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId) || workspaces[0]
+
+  const handleSignOut = async () => {
+    "use server"
+    await signOut()
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="border-b bg-white">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
+          {/* Left: Logo + Nav */}
           <div className="flex items-center gap-6">
             <Link href="/" className="text-xl font-bold">
               Consay
             </Link>
-            <nav className="flex gap-4">
-              <Link
-                href="/"
-                className="text-sm text-gray-600 hover:text-gray-900"
-              >
-                Records
-              </Link>
-              <Link
-                href="/new"
-                className="text-sm text-gray-600 hover:text-gray-900"
-              >
-                New Request
-              </Link>
-            </nav>
+            <Separator orientation="vertical" className="h-6" />
+            <NavLinks />
           </div>
-          <div className="flex items-center gap-4">
-            <WorkspaceSwitcher
-              workspaces={workspaceList}
-              currentWorkspaceId={selectedWorkspaceId}
-            />
-            <WorkspaceCreateDialog />
-            <span className="text-sm text-gray-600">{user.email}</span>
-            <form
-              action={async () => {
-                "use server"
-                const supabase = await createClient()
-                await supabase.auth.signOut()
-                redirect("/login")
-              }}
-            >
-              <Button variant="outline" size="sm" type="submit">
-                Sign out
-              </Button>
-            </form>
-          </div>
+
+          {/* Right: User menu (workspace controls live inside) */}
+          <UserMenu
+            email={session.user?.email || ""}
+            signOutAction={handleSignOut}
+            workspaces={workspaces}
+            currentWorkspace={currentWorkspace}
+          />
         </div>
       </header>
       <main className="container mx-auto p-4">{children}</main>

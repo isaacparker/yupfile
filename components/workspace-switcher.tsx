@@ -9,12 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-
-type Workspace = {
-  id: string
-  name: string
-  created_at: string
-}
+import type { Workspace } from "@/lib/supabase/db"
 
 type WorkspaceSwitcherProps = {
   workspaces: Workspace[]

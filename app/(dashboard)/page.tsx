@@ -2,102 +2,87 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { createClient } from "@/lib/supabase/server"
+import { mapRecord, mapEvent } from "@/lib/supabase/db"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
-import { WorkspaceCreateDialog } from "@/components/workspace-create-dialog"
 import Link from "next/link"
 import { SCOPE_LABELS } from "@/lib/consent-copy"
+import { statusVariant } from "@/lib/status"
 
 export default async function HomePage() {
   const session = await auth()
 
-  if (!session?.user?.email) {
+  if (!session?.user?.id) {
     redirect("/login")
   }
 
-  // Fetch user with workspaces
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: {
-      workspaces: {
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  })
+  const supabase = await createClient()
 
-  const workspaces = user?.workspaces || []
+  // Get workspaces — layout auto-creates one if needed, so we always have at least one
+  const { data: workspaceRows } = await supabase
+    .from("workspaces")
+    .select("*")
+    .eq("user_id", session.user.id)
+    .order("created_at", { ascending: false })
 
   // Get selected workspace from cookie
   const cookieStore = await cookies()
   const selectedWorkspaceId = cookieStore.get("consay_workspace_id")?.value
 
-  // Find the current workspace
-  const currentWorkspace = workspaces.find((w) => w.id === selectedWorkspaceId) || workspaces[0]
+  const workspaces = workspaceRows || []
+  const currentWorkspace =
+    workspaces.find((w) => w.id === selectedWorkspaceId) || workspaces[0]
 
-  // If no workspaces exist, show empty state
-  if (workspaces.length === 0) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Welcome to Consay</h1>
-          <p className="text-gray-600">
-            Create your first workspace to get started
-          </p>
-        </div>
+  // Fetch consent records for current workspace with their latest event
+  let records: Array<ReturnType<typeof mapRecord> & { events: ReturnType<typeof mapEvent>[] }> = []
 
-        <Card>
-          <CardHeader>
-            <CardTitle>No workspaces yet</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-gray-600">
-              Workspaces help you organize consent records by brand or client.
-            </p>
-            <WorkspaceCreateDialog />
-          </CardContent>
-        </Card>
-      </div>
-    )
+  if (currentWorkspace) {
+    const { data: recordRows } = await supabase
+      .from("consent_records")
+      .select("*")
+      .eq("workspace_id", currentWorkspace.id)
+      .order("created_at", { ascending: false })
+
+    if (recordRows && recordRows.length > 0) {
+      const recordIds = recordRows.map((r) => r.id)
+      const { data: eventRows } = await supabase
+        .from("consent_events")
+        .select("*")
+        .in("record_id", recordIds)
+        .order("created_at", { ascending: false })
+
+      const eventsByRecord = new Map<string, ReturnType<typeof mapEvent>[]>()
+      for (const row of eventRows || []) {
+        const mapped = mapEvent(row)
+        const existing = eventsByRecord.get(mapped.recordId) || []
+        existing.push(mapped)
+        eventsByRecord.set(mapped.recordId, existing)
+      }
+
+      records = recordRows.map((row) => ({
+        ...mapRecord(row),
+        events: (eventsByRecord.get(row.id) || []).slice(0, 1),
+      }))
+    }
   }
 
-  // Fetch consent records for current workspace
-  const records = currentWorkspace
-    ? await prisma.consentRecord.findMany({
-        where: {
-          workspaceId: currentWorkspace.id,
-        },
-        include: {
-          events: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      })
-    : []
-
-  const statusColor = (status: string) =>
-    ({
-      pending: "bg-yellow-100 text-yellow-800",
-      approved: "bg-green-100 text-green-800",
-      declined: "bg-red-100 text-red-800",
-    }[status] || "bg-gray-100 text-gray-800")
+  const showWorkspaceName = workspaces.length > 1
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Consent Records</h1>
-          {currentWorkspace && (
-            <p className="text-gray-600">
-              Workspace: <span className="font-medium">{currentWorkspace.name}</span>
+          {showWorkspaceName && currentWorkspace && (
+            <p className="text-sm text-muted-foreground">
+              {currentWorkspace.name}
             </p>
           )}
         </div>
-        <Link href="/new">
-          <Button>New Request</Button>
-        </Link>
+        <Button asChild>
+          <Link href="/new">New Request</Link>
+        </Button>
       </div>
 
       {records.length === 0 ? (
@@ -109,9 +94,9 @@ export default async function HomePage() {
             <p className="text-gray-600 mb-4">
               Create your first consent request to get started.
             </p>
-            <Link href="/new">
-              <Button>Create Consent Request</Button>
-            </Link>
+            <Button asChild>
+              <Link href="/new">Create Consent Request</Link>
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -131,7 +116,7 @@ export default async function HomePage() {
                           <Badge variant="outline" className="capitalize">
                             {record.platform}
                           </Badge>
-                          <Badge className={statusColor(latestEvent?.status || "pending")}>
+                          <Badge variant={statusVariant(latestEvent?.status || "pending")}>
                             {latestEvent?.status || "pending"}
                           </Badge>
                         </div>

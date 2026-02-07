@@ -2,11 +2,11 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -14,6 +14,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { PLATFORMS, SCOPE_LABELS, generateConsentText } from "@/lib/consent-copy"
 
 type Scope = "organic" | "paid_ads" | "organic_and_ads"
@@ -82,6 +90,18 @@ export default function NewConsentRequestPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink href="/">Records</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>New Request</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
       <div>
         <h1 className="text-3xl font-bold">New Consent Request</h1>
         <p className="text-gray-600">
@@ -122,7 +142,7 @@ export default function NewConsentRequestPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="creatorHandle">Creator Handle *</Label>
                 <Input
@@ -207,12 +227,11 @@ export default function NewConsentRequestPage() {
 
         <div className="flex gap-4">
           <Button
-            type="button"
             variant="outline"
-            onClick={() => router.back()}
             disabled={isLoading}
+            asChild
           >
-            Cancel
+            <Link href="/">Cancel</Link>
           </Button>
           <Button type="submit" disabled={isLoading}>
             {isLoading ? "Creating..." : "Create Consent Request"}

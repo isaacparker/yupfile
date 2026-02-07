@@ -1,39 +1,30 @@
 import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { createClient } from "@/lib/supabase/server"
+import { mapWorkspace } from "@/lib/supabase/db"
 import { NextResponse } from "next/server"
 
 export async function GET() {
   const session = await auth()
 
-  if (!session?.user?.email) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-    include: {
-      workspaces: {
-        orderBy: { createdAt: "desc" },
-      },
-    },
-  })
+  const supabase = await createClient()
+  const { data: rows } = await supabase
+    .from("workspaces")
+    .select("*")
+    .eq("user_id", session.user.id)
+    .order("created_at", { ascending: false })
 
-  return NextResponse.json(user?.workspaces || [])
+  return NextResponse.json((rows || []).map(mapWorkspace))
 }
 
 export async function POST(request: Request) {
   const session = await auth()
 
-  if (!session?.user?.email) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-  })
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 })
   }
 
   const body = await request.json()
@@ -43,12 +34,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Workspace name is required" }, { status: 400 })
   }
 
-  const workspace = await prisma.workspace.create({
-    data: {
-      name: name.trim(),
-      userId: user.id,
-    },
-  })
+  const supabase = await createClient()
+  const { data: row, error } = await supabase
+    .from("workspaces")
+    .insert({ name: name.trim(), user_id: session.user.id })
+    .select()
+    .single()
 
-  return NextResponse.json(workspace)
+  if (error) {
+    return NextResponse.json({ error: "Failed to create workspace" }, { status: 500 })
+  }
+
+  return NextResponse.json(mapWorkspace(row))
 }

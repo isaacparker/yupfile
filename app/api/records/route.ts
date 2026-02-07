@@ -1,5 +1,6 @@
 import { auth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
+import { createClient } from "@/lib/supabase/server"
+import { mapRecord, mapEvent } from "@/lib/supabase/db"
 import { generateApprovalToken, generateSlug, generateTokenExpiry } from "@/lib/tokens"
 import { generateConsentText } from "@/lib/consent-copy"
 import { NextResponse } from "next/server"
@@ -8,16 +9,8 @@ import { cookies } from "next/headers"
 export async function POST(request: Request) {
   const session = await auth()
 
-  if (!session?.user?.email) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-  })
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 })
   }
 
   // Get workspace from cookie
@@ -31,13 +24,15 @@ export async function POST(request: Request) {
     )
   }
 
-  // Verify workspace belongs to user
-  const workspace = await prisma.workspace.findFirst({
-    where: {
-      id: workspaceId,
-      userId: user.id,
-    },
-  })
+  const supabase = await createClient()
+
+  // Verify workspace belongs to user (RLS handles this, but explicit check)
+  const { data: workspace } = await supabase
+    .from("workspaces")
+    .select("id")
+    .eq("id", workspaceId)
+    .eq("user_id", session.user.id)
+    .single()
 
   if (!workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 })
@@ -62,10 +57,19 @@ export async function POST(request: Request) {
   try {
     // Generate unique slug (with collision check)
     let slug = generateSlug()
-    let slugExists = await prisma.consentRecord.findUnique({ where: { slug } })
-    while (slugExists) {
+    let { data: existing } = await supabase
+      .from("consent_records")
+      .select("id")
+      .eq("slug", slug)
+      .single()
+    while (existing) {
       slug = generateSlug()
-      slugExists = await prisma.consentRecord.findUnique({ where: { slug } })
+      const result = await supabase
+        .from("consent_records")
+        .select("id")
+        .eq("slug", slug)
+        .single()
+      existing = result.data
     }
 
     // Generate consent text
@@ -80,36 +84,51 @@ export async function POST(request: Request) {
     const approvalToken = generateApprovalToken()
     const approvalTokenExpiry = generateTokenExpiry()
 
-    // Create consent record with initial event
-    const record = await prisma.consentRecord.create({
-      data: {
+    // Create consent record
+    const { data: recordRow, error: recordError } = await supabase
+      .from("consent_records")
+      .insert({
         slug,
-        contentUrl,
-        creatorHandle,
+        content_url: contentUrl,
+        creator_handle: creatorHandle,
         platform,
-        workspaceId: workspace.id,
-        events: {
-          create: {
-            eventType: "initial",
-            scope,
-            consentText,
-            status: "pending",
-            approvalToken,
-            approvalTokenExpiry,
-          },
-        },
-      },
-      include: {
-        events: true,
-      },
-    })
+        workspace_id: workspace.id,
+      })
+      .select()
+      .single()
+
+    if (recordError || !recordRow) {
+      throw new Error(recordError?.message || "Failed to create record")
+    }
+
+    // Create initial consent event
+    const { data: eventRow, error: eventError } = await supabase
+      .from("consent_events")
+      .insert({
+        record_id: recordRow.id,
+        event_type: "initial",
+        scope,
+        consent_text: consentText,
+        status: "pending",
+        approval_token: approvalToken,
+        approval_token_expiry: approvalTokenExpiry.toISOString(),
+      })
+      .select()
+      .single()
+
+    if (eventError) {
+      throw new Error(eventError.message)
+    }
+
+    const record = mapRecord(recordRow)
+    const event = eventRow ? mapEvent(eventRow) : null
 
     // Generate approval URL
-    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000"
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
     const approvalUrl = `${baseUrl}/approve/${approvalToken}`
 
     return NextResponse.json({
-      record,
+      record: { ...record, events: event ? [event] : [] },
       approvalUrl,
       consentText,
     })
@@ -125,16 +144,8 @@ export async function POST(request: Request) {
 export async function GET() {
   const session = await auth()
 
-  if (!session?.user?.email) {
+  if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { email: session.user.email },
-  })
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 })
   }
 
   // Get workspace from cookie
@@ -145,22 +156,39 @@ export async function GET() {
     return NextResponse.json([])
   }
 
-  // Fetch all records for the workspace
-  const records = await prisma.consentRecord.findMany({
-    where: {
-      workspaceId,
-      workspace: {
-        userId: user.id,
-      },
-    },
-    include: {
-      events: {
-        orderBy: { createdAt: "desc" },
-        take: 1, // Get latest event for status
-      },
-    },
-    orderBy: { createdAt: "desc" },
-  })
+  const supabase = await createClient()
+
+  // Fetch records (RLS ensures user only sees their own)
+  const { data: recordRows } = await supabase
+    .from("consent_records")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .order("created_at", { ascending: false })
+
+  if (!recordRows || recordRows.length === 0) {
+    return NextResponse.json([])
+  }
+
+  // Fetch latest event for each record
+  const recordIds = recordRows.map((r) => r.id)
+  const { data: eventRows } = await supabase
+    .from("consent_events")
+    .select("*")
+    .in("record_id", recordIds)
+    .order("created_at", { ascending: false })
+
+  const eventsByRecord = new Map<string, ReturnType<typeof mapEvent>[]>()
+  for (const row of eventRows || []) {
+    const mapped = mapEvent(row)
+    const existing = eventsByRecord.get(mapped.recordId) || []
+    existing.push(mapped)
+    eventsByRecord.set(mapped.recordId, existing)
+  }
+
+  const records = recordRows.map((row) => ({
+    ...mapRecord(row),
+    events: (eventsByRecord.get(row.id) || []).slice(0, 1),
+  }))
 
   return NextResponse.json(records)
 }

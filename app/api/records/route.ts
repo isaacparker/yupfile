@@ -13,28 +13,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  const supabase = await createClient()
+
   // Get workspace from cookie
   const cookieStore = await cookies()
-  const workspaceId = cookieStore.get("consay_workspace_id")?.value
+  let workspaceId = cookieStore.get("consay_workspace_id")?.value
+
+  // If no cookie, get first workspace for this user
+  if (!workspaceId) {
+    const { data: workspaces } = await supabase
+      .from("workspaces")
+      .select("id")
+      .eq("user_id", session.user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+
+    workspaceId = workspaces?.[0]?.id
+  }
 
   if (!workspaceId) {
     return NextResponse.json(
-      { error: "No workspace selected. Please select or create a workspace first." },
+      { error: "No workspace found. Please create a workspace first." },
       { status: 400 }
     )
   }
 
-  const supabase = await createClient()
-
   // Verify workspace belongs to user (RLS handles this, but explicit check)
-  const { data: workspace } = await supabase
+  const { data: workspace, error: workspaceError } = await supabase
     .from("workspaces")
     .select("id")
     .eq("id", workspaceId)
     .eq("user_id", session.user.id)
     .single()
 
-  if (!workspace) {
+  if (workspaceError || !workspace) {
     return NextResponse.json({ error: "Workspace not found" }, { status: 404 })
   }
 
